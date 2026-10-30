@@ -1,0 +1,19 @@
+name: Import official Tor Browser source
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  mirror-upstream:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mirror Tor Project repository into GTor
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git clone --mirror https://gitlab.torproject.org/tpo/applications/tor-browser.git tor-browser.git
+          git -C tor-browser.git push --mirror "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
