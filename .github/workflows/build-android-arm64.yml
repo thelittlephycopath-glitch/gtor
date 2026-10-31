@@ -45,6 +45,20 @@ jobs:
           fi
           echo "GTor source pin: $actual"
 
+      - name: Install official build-system host dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libdata-dump-perl libdata-uuid-perl libdatetime-perl \
+            libdigest-sha-perl libfile-copy-recursive-perl \
+            libfile-slurp-perl libio-all-perl libcapture-tiny-perl \
+            libio-handle-util-perl libjson-perl libparallel-forkmanager-perl \
+            libpath-tiny-perl libsort-versions-perl libstring-shellquote-perl \
+            libtemplate-perl libxml-libxml-perl libxml-writer-perl \
+            libyaml-libyaml-perl uidmap zstd jq zip mercurial
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Check build host
         run: |
           set -euo pipefail
