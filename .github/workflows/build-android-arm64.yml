@@ -1,0 +1,112 @@
+name: Build Tor Browser Android ARM64
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-android-arm64.yml"
+      - ".gitmodules"
+      - "GTOR_SOURCE.md"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gtor-android-arm64-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-arm64:
+    name: Official Tor Browser ARM64 test build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    env:
+      RBM_NO_DEBUG: "1"
+      RBM_NUM_PROCS: "2"
+    steps:
+      - name: Check out GTor main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          submodules: false
+          fetch-depth: 1
+
+      - name: Verify pinned upstream source reference
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="1f8c6d9758e139aee1da08d170fe59a5b4580e87"
+          actual="$(git ls-tree HEAD upstream/tor-browser | awk '{print $3}')"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "Unexpected Tor Browser source pin: $actual" >&2
+            exit 1
+          fi
+          echo "GTor source pin: $actual"
+
+      - name: Check build host
+        run: |
+          set -euo pipefail
+          docker version
+          df -h /
+          free -h
+          nproc
+
+      - name: Fetch official Tor Browser build system
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --recurse-submodules \
+            https://gitlab.torproject.org/tpo/applications/tor-browser-build.git \
+            tor-browser-build
+          echo "Build-system revision:"
+          git -C tor-browser-build log -1 --format='%H%n%cI%n%s'
+          git -C tor-browser-build submodule status
+
+      - name: Build Android ARM64 test APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd tor-browser-build
+          make torbrowser-testbuild-android-aarch64
+
+      - name: Verify APK architecture and collect output
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/arm64-apks"
+          mapfile -t apks < <(find tor-browser-build -type f -name '*.apk' -not -path '*/.git/*' | sort)
+          if (( ${#apks[@]} == 0 )); then
+            echo "Build completed but no APK files were found." >&2
+            exit 1
+          fi
+
+          verified=0
+          for apk in "${apks[@]}"; do
+            entries="$(unzip -Z1 "$apk")"
+            if ! grep -q '^lib/arm64-v8a/' <<< "$entries"; then
+              echo "Skipping APK without ARM64 native libraries: $apk"
+              continue
+            fi
+            if grep -Eq '^lib/(x86|x86_64|armeabi-v7a)/' <<< "$entries"; then
+              echo "Unexpected non-ARM64 native ABI found in: $apk" >&2
+              exit 1
+            fi
+            cp "$apk" "$GITHUB_WORKSPACE/arm64-apks/"
+            verified=$((verified + 1))
+          done
+
+          if (( verified == 0 )); then
+            echo "No ARM64 APK passed ABI verification." >&2
+            exit 1
+          fi
+          printf 'Verified %s ARM64 APK(s).\n' "$verified"
+          sha256sum "$GITHUB_WORKSPACE"/arm64-apks/*.apk | tee "$GITHUB_WORKSPACE/arm64-apks/SHA256SUMS.txt"
+
+      - name: Upload ARM64 APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gtor-android-arm64-testbuild
+          path: arm64-apks/*
+          if-no-files-found: error
+          retention-days: 14
