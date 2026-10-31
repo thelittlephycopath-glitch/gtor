@@ -21,10 +21,10 @@ If GTor is already cloned:
 git submodule update --init --recursive
 ```
 
-The source is pinned to an exact upstream commit so builds are reproducible. Update the submodule pointer only after reviewing a new upstream revision.
+The source is pinned to an exact upstream commit so checkouts are reproducible. The scheduled upstream check follows the tracked stable branch and opens a pull request when a newer commit is available. Review the upstream change and run the ARM64 build before merging the update.
 
 ## Android ABI scope
 
-The intended Android release target is **ARM64 only (`arm64-v8a`)**. Do not produce Android `x86`, `x86_64`, or `armeabi-v7a` APK variants. Keep host-side build tools and upstream source files intact: architecture-specific source files are not APK outputs, and deleting them blindly can break the official build system. The ARM64 restriction belongs in the Android build/package configuration.
+The intended Android release target is **ARM64 only (`arm64-v8a`)**. Do not produce Android `x86`, `x86_64`, or `armeabi-v7a` APK variants. Keep host-side build tools and upstream source files intact: architecture-specific source files are not APK outputs, and deleting them blindly can break the official build system.
 
-This source import is not yet an APK build. The official Tor Browser build system and its pinned dependencies must be wired into CI before a release APK can be claimed.
+This source pin is not itself an APK build. The official Tor Browser build system and its pinned dependencies must be wired to consume this exact source revision before a GTor APK can be claimed as built from this pin.
