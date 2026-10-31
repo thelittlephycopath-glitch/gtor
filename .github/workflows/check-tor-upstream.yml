@@ -1,0 +1,104 @@
+name: Check Tor Browser upstream updates
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/check-tor-upstream.yml"
+      - "scripts/update-tor-upstream.sh"
+      - "GTOR_SOURCE.md"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: gtor-upstream-update
+  cancel-in-progress: false
+
+jobs:
+  check-upstream:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out GTor
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Fetch pinned Tor Browser source branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch="$(sed -n 's/^- Upstream branch at import time: `\(.*\)`$/\1/p' GTOR_SOURCE.md)"
+          if [[ -z "$branch" ]]; then
+            echo "Could not read the tracked Tor Browser branch from GTOR_SOURCE.md" >&2
+            exit 1
+          fi
+          git submodule update --init --depth 1 -- upstream/tor-browser
+          git -C upstream/tor-browser fetch --depth=1 origin "refs/heads/$branch"
+          git -C upstream/tor-browser checkout --detach FETCH_HEAD
+
+      - name: Update source pin metadata
+        id: update
+        shell: bash
+        run: |
+          set -euo pipefail
+          old_pin="$(git ls-tree HEAD upstream/tor-browser | awk '{print $3}')"
+          new_pin="$(git -C upstream/tor-browser rev-parse HEAD)"
+          echo "old_pin=$old_pin" >> "$GITHUB_OUTPUT"
+          echo "new_pin=$new_pin" >> "$GITHUB_OUTPUT"
+          if [[ "$old_pin" == "$new_pin" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "GTor already points at the latest commit on the tracked stable branch."
+            exit 0
+          fi
+          python3 - "$new_pin" <<'PY'
+          from datetime import datetime, timezone
+          from pathlib import Path
+          import re
+          import sys
+
+          pin = sys.argv[1]
+          path = Path("GTOR_SOURCE.md")
+          content = path.read_text()
+          content, count = re.subn(
+              r"(?m)^- Pinned upstream commit: `[0-9a-f]{40}`$",
+              f"- Pinned upstream commit: `{pin}`",
+              content,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit("Could not update exactly one pinned-commit entry")
+          content, count = re.subn(
+              r"(?m)^- Source checkout date: .*?$",
+              f"- Source checkout date: {datetime.now(timezone.utc).date().isoformat()}",
+              content,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit("Could not update exactly one source-checkout date")
+          path.write_text(content)
+          PY
+          git add upstream/tor-browser GTOR_SOURCE.md
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "chore: update pinned Tor Browser source"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Open source-update pull request
+        if: steps.update.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OLD_PIN: ${{ steps.update.outputs.old_pin }}
+          NEW_PIN: ${{ steps.update.outputs.new_pin }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          update_branch="automation/tor-source-${GITHUB_RUN_NUMBER}"
+          git switch -c "$update_branch"
+          git push --set-upstream origin "$update_branch"
+          gh pr create             --base main             --head "$update_branch"             --title "chore: update pinned Tor Browser source"             --body "Automated update from the tracked official Tor Browser stable branch.\n\n- Previous pin: `$OLD_PIN`\n- Proposed pin: `$NEW_PIN`\n\nReview the upstream commit and run the ARM64 build before merging."
