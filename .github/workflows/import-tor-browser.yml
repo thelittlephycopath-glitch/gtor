@@ -1,4 +1,4 @@
-name: Import official Tor Browser source
+name: Import latest official Tor Browser source
 
 on:
   workflow_dispatch:
@@ -7,13 +7,40 @@ permissions:
   contents: write
 
 jobs:
-  mirror-upstream:
+  import-latest:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
-      - name: Mirror Tor Project repository into GTor
+      - name: Detect upstream default branch
+        id: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          UPSTREAM_URL="https://gitlab.torproject.org/tpo/applications/tor-browser.git"
+          HEAD_REF="$(git ls-remote --symref "$UPSTREAM_URL" HEAD | awk '$1 == "ref:" { print $2; exit }')"
+          if [[ -z "$HEAD_REF" ]]; then
+            echo "Could not determine the Tor Project repository default branch." >&2
+            exit 1
+          fi
+          UPSTREAM_BRANCH="${HEAD_REF#refs/heads/}"
+          echo "branch=$UPSTREAM_BRANCH" >> "$GITHUB_OUTPUT"
+          echo "Upstream default branch: $UPSTREAM_BRANCH"
+
+      - name: Fetch latest upstream snapshot
+        env:
+          UPSTREAM_BRANCH: ${{ steps.upstream.outputs.branch }}
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --single-branch --branch "$UPSTREAM_BRANCH" \
+            https://gitlab.torproject.org/tpo/applications/tor-browser.git tor-browser
+          echo "Upstream commit:"
+          git -C tor-browser log -1 --format='%H%n%cI%n%s'
+
+      - name: Import latest snapshot into GTor main
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          git clone --mirror https://gitlab.torproject.org/tpo/applications/tor-browser.git tor-browser.git
-          git -C tor-browser.git push --mirror "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git -C tor-browser remote add gtor \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git -C tor-browser push --force gtor "HEAD:refs/heads/main"
