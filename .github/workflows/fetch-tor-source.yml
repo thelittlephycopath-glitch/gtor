@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   fetch-source:
-    name: Fetch and verify Tor Browser 16.0 source
+    name: Fetch, verify, and split Tor Browser 16.0 source
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -34,13 +34,86 @@ jobs:
           grep -F "  $archive" source-snapshot/sha256sums-signed-build.txt > source-snapshot/expected.sha256
           test -s source-snapshot/expected.sha256
           (cd source-snapshot && sha256sum --check expected.sha256)
-          printf '%s\n'             "Tor Browser release: 16.0"             "Firefox ESR: 153.6.0"             "Source archive: $archive"             "Upstream: https://gitlab.torproject.org/tpo/applications/tor-browser"             "Downloaded from: $base" > source-snapshot/GTOR_SOURCE_MANIFEST.txt
+          printf '%s\n' \
+            "Tor Browser release: 16.0" \
+            "Firefox ESR: 153.6.0" \
+            "Source archive: $archive" \
+            "Upstream: https://gitlab.torproject.org/tpo/applications/tor-browser" \
+            "Downloaded from: $base" > source-snapshot/GTOR_SOURCE_MANIFEST.txt
           sha256sum "source-snapshot/$archive" | tee source-snapshot/SHA256SUMS.local
+          split --bytes=128M --numeric-suffixes=0 --suffix-length=2 \
+            "source-snapshot/$archive" source-snapshot/part
+          printf 'archive=%s\n' "$archive" > source-snapshot/PARTS.txt
+          printf 'part_count=%s\n' "$(find source-snapshot -maxdepth 1 -name 'part[0-9][0-9]' | wc -l)" >> source-snapshot/PARTS.txt
+          (cd source-snapshot && sha256sum part[0-9][0-9] > PART_SHA256SUMS)
+          test "$(find source-snapshot -maxdepth 1 -name 'part[0-9][0-9]' | wc -l)" -le 7
 
-      - name: Upload verified source archive
+      - name: Upload source part 00
         uses: actions/upload-artifact@v4
         with:
-          name: gtor-tor-browser-16.0-source
-          path: source-snapshot/
+          name: gtor-source-part-00
+          path: source-snapshot/part00
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Upload source part 01
+        uses: actions/upload-artifact@v4
+        with:
+          name: gtor-source-part-01
+          path: source-snapshot/part01
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Upload source part 02
+        uses: actions/upload-artifact@v4
+        with:
+          name: gtor-source-part-02
+          path: source-snapshot/part02
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Upload source part 03
+        uses: actions/upload-artifact@v4
+        with:
+          name: gtor-source-part-03
+          path: source-snapshot/part03
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Upload source part 04
+        uses: actions/upload-artifact@v4
+        with:
+          name: gtor-source-part-04
+          path: source-snapshot/part04
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Upload source part 05
+        uses: actions/upload-artifact@v4
+        with:
+          name: gtor-source-part-05
+          path: source-snapshot/part05
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Upload source part 06
+        uses: actions/upload-artifact@v4
+        with:
+          name: gtor-source-part-06
+          path: source-snapshot/part06
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Upload source transfer manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: gtor-source-transfer-manifest
+          path: |
+            source-snapshot/GTOR_SOURCE_MANIFEST.txt
+            source-snapshot/PARTS.txt
+            source-snapshot/PART_SHA256SUMS
+            source-snapshot/SHA256SUMS.local
+            source-snapshot/sha256sums-signed-build.txt
+            source-snapshot/expected.sha256
           if-no-files-found: error
           retention-days: 30
