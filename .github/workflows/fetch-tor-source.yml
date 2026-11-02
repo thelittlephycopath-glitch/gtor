@@ -1,0 +1,46 @@
+name: Fetch official Tor Browser source snapshot
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/fetch-tor-source.yml"
+      - "GTOR_SOURCE.md"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gtor-source-snapshot
+  cancel-in-progress: false
+
+jobs:
+  fetch-source:
+    name: Fetch and verify Tor Browser 16.0 source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Download official source and checksum manifest
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          base="https://dist.torproject.org/torbrowser/16.0"
+          archive="src-firefox-tor-browser-153.6.0esr-16.0-1-build3.tar.xz"
+          mkdir -p source-snapshot
+          curl --fail --location --retry 5 --retry-all-errors --output "source-snapshot/$archive" "$base/$archive"
+          curl --fail --location --retry 5 --retry-all-errors --output source-snapshot/sha256sums-signed-build.txt "$base/sha256sums-signed-build.txt"
+          grep -F "  $archive" source-snapshot/sha256sums-signed-build.txt > source-snapshot/expected.sha256
+          test -s source-snapshot/expected.sha256
+          (cd source-snapshot && sha256sum --check expected.sha256)
+          printf '%s\n'             "Tor Browser release: 16.0"             "Firefox ESR: 153.6.0"             "Source archive: $archive"             "Upstream: https://gitlab.torproject.org/tpo/applications/tor-browser"             "Downloaded from: $base" > source-snapshot/GTOR_SOURCE_MANIFEST.txt
+          sha256sum "source-snapshot/$archive" | tee source-snapshot/SHA256SUMS.local
+
+      - name: Upload verified source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: gtor-tor-browser-16.0-source
+          path: source-snapshot/
+          if-no-files-found: error
+          retention-days: 30
