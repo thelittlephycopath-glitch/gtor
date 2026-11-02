@@ -18,11 +18,11 @@ concurrency:
 
 jobs:
   fetch-source:
-    name: Fetch, verify, and split Tor Browser 16.0 source
+    name: Fetch, authenticate, and split Tor Browser 16.0 source
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
-      - name: Download official source and checksum manifest
+      - name: Download official source, signatures, and checksum manifest
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -30,7 +30,21 @@ jobs:
           archive="src-firefox-tor-browser-153.6.0esr-16.0-1-build3.tar.xz"
           mkdir -p source-snapshot
           curl --fail --location --retry 5 --retry-all-errors --output "source-snapshot/$archive" "$base/$archive"
+          curl --fail --location --retry 5 --retry-all-errors --output "source-snapshot/$archive.asc" "$base/$archive.asc"
           curl --fail --location --retry 5 --retry-all-errors --output source-snapshot/sha256sums-signed-build.txt "$base/sha256sums-signed-build.txt"
+          curl --fail --location --retry 5 --retry-all-errors --output source-snapshot/sha256sums-signed-build.txt.asc "$base/sha256sums-signed-build.txt.asc"
+
+          export GNUPGHOME="$RUNNER_TEMP/torbrowser-gnupg"
+          install -d -m 700 "$GNUPGHOME"
+          gpg --batch --auto-key-locate nodefault,wkd --locate-keys torbrowser@torproject.org
+          fingerprint="EF6E286DDA85EA2A4BA7DE684E2C6E8793298290"
+          actual_fingerprint="$(gpg --batch --with-colons --fingerprint "$fingerprint" | awk -F: '$1 == "fpr" { print $10; exit }')"
+          test "$actual_fingerprint" = "$fingerprint"
+          gpg --batch --export "$fingerprint" > source-snapshot/torbrowser-keyring.gpg
+          test -s source-snapshot/torbrowser-keyring.gpg
+          gpgv --keyring source-snapshot/torbrowser-keyring.gpg "source-snapshot/$archive.asc" "source-snapshot/$archive"
+          gpgv --keyring source-snapshot/torbrowser-keyring.gpg source-snapshot/sha256sums-signed-build.txt.asc source-snapshot/sha256sums-signed-build.txt
+
           grep -F "  $archive" source-snapshot/sha256sums-signed-build.txt > source-snapshot/expected.sha256
           test -s source-snapshot/expected.sha256
           (cd source-snapshot && sha256sum --check expected.sha256)
@@ -38,6 +52,10 @@ jobs:
             "Tor Browser release: 16.0" \
             "Firefox ESR: 153.6.0" \
             "Source archive: $archive" \
+            "Upstream commit: 1f8c6d9758e139aee1da08d170fe59a5b4580e87" \
+            "Tor Browser signing-key fingerprint: $fingerprint" \
+            "Detached archive signature: verified" \
+            "Detached checksum-manifest signature: verified" \
             "Upstream: https://gitlab.torproject.org/tpo/applications/tor-browser" \
             "Downloaded from: $base" > source-snapshot/GTOR_SOURCE_MANIFEST.txt
           sha256sum "source-snapshot/$archive" | tee source-snapshot/SHA256SUMS.local
@@ -104,7 +122,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-      - name: Upload source transfer manifest
+      - name: Upload source transfer manifest and signatures
         uses: actions/upload-artifact@v4
         with:
           name: gtor-source-transfer-manifest
@@ -114,6 +132,9 @@ jobs:
             source-snapshot/PART_SHA256SUMS
             source-snapshot/SHA256SUMS.local
             source-snapshot/sha256sums-signed-build.txt
+            source-snapshot/sha256sums-signed-build.txt.asc
+            source-snapshot/torbrowser-keyring.gpg
             source-snapshot/expected.sha256
+            source-snapshot/src-firefox-tor-browser-153.6.0esr-16.0-1-build3.tar.xz.asc
           if-no-files-found: error
           retention-days: 30
