@@ -1,3 +1,0 @@
-[submodule "upstream/tor-browser"]
-	path = upstream/tor-browser
-	url = https://gitlab.torproject.org/tpo/applications/tor-browser.git
